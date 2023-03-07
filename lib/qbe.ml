@@ -4,7 +4,7 @@
 
 exception BadQBE of string
 
-type qbeIntegral =
+(* type qbeIntegral =
   | Word
   | Long
   | Byte
@@ -26,13 +26,22 @@ type qbetype =
   (* no in-place types, right? *)
   | Struct of string (* just use name *)
       (* string * int * qbetype list (* int is alignment *) *)
+*)
+type qbetype =
+  | Word
+  | Long
+  | Byte
+  | Halfword
+  | Single
+  | Double
+  | Struct of string
 
-let wtype = Primitive (Integral Word)
+(*let wtype = Primitive (Integral Word)
 let ltype = Primitive (Integral Long)
 let btype = Primitive (Integral Byte)
 let htype = Primitive (Integral Halfword)
 let stype = Primitive (Floating Single)
-let dtype = Primitive (Floating Double)
+  let dtype = Primitive (Floating Double) *)
 
 
 (* Do I witness this? "type value associated with constructed value" *)
@@ -68,14 +77,14 @@ type qbevalue =
 
 (* Idea: could at least use GADTs to diff lvalues *)
 
-let qTypeOf: qbevalue -> qbetype = function
+(* let qTypeOf: qbevalue -> qbetype = function
   (* for consts we have to assume the largest type until we
      get a context. Then we have to check *)
   | Const (IConst _) -> Primitive (Integral Long)
   | Const (FConst _) -> Primitive (Floating Double)
   | Reg (qty, _) -> qty
   | Global (qty, _) -> qty
-  
+*)
 
 (* store the return type? Maybe not, just let it be whatever the
    result type is? Let the build function take the return type,
@@ -179,9 +188,9 @@ type qbeinstr =
 *)
 
 type qbelinkage =
-  | Export of string option
-  | Thread of string option
-  | Section of string * string option * string option
+  | Export of string
+  | Thread of string
+  | Section of string * string * string
 
 type qbetypedef = {
   typename: string;
@@ -212,8 +221,9 @@ type qbeblock = {
 
 and qbefunction = {
   name: string;
+  linkage: qbelinkage option;
   mutable regctr: int;
-  rettype: qbetype;
+  rettype: qbetype option;
   params: (qbetype * string) list;
   mutable blocks: qbeblock list
 }
@@ -274,6 +284,22 @@ let buildAdd theBlock lval rettype v1 v2 =
 
 (* string_of functions *)
 
+let string_of_qbetype = function
+  | Word -> "w"
+  | Long -> "l"
+  | Byte -> "b"
+  | Halfword -> "h"
+  | Single -> "s"
+  | Double -> "d"
+  | Struct name -> ":" ^ name
+
+let string_of_qbelinkage = function
+  | Export nm ->
+    "export " ^ (if nm <> "" then nm ^ " " else "")
+  | Thread nm ->
+    "thread " ^ (if nm <> "" then nm ^ " " else "")
+  | Section (nm, _, _) ->
+    "section " ^ (if nm <> "" then nm ^ " " else "")
 
 let string_of_qbeinstr = "" (* see sprintf *)
 
@@ -282,15 +308,32 @@ let string_of_qbevalue : (*type t. t*) qbevalue -> string = function
   (* type markers aren't on the constant *)
   | Const (IConst n) -> Int64.to_string n
   | Const (FConst x) -> string_of_float x
-  | Reg (_, rname) -> "%" ^ rname
-  | Global (_, gname) -> "$" ^ gname
+  | Reg (ty, rname) -> string_of_qbetype ty ^ " %" ^ rname
+  | Global (ty, gname) -> string_of_qbetype ty ^ " $" ^ gname
 
 let string_of_qbeblock blk =
   if blk.label = "start"
   (* Actually should put this check in the insert_block function *)
   then raise (BadQBE "Label name @start reserved for function entry point")
   else 
-    "@" ^ blk.label ^ "\n\n"
+    "@" ^ blk.label ^ "\n"
+
+let string_of_qbefunction func =
+  (match func.linkage with
+   | None -> ""
+   | Some lnk -> string_of_qbelinkage lnk)
+  ^ "function " 
+  ^ (match func.rettype with
+      | Some rty -> string_of_qbetype rty
+      | None -> "")
+  ^ " $" ^ func.name ^ "("
+  ^ String.concat ", "
+    (List.map
+       (fun (ty, nm) -> string_of_qbevalue (Reg (ty,nm)))
+       func.params)
+  ^ ") {\n"
+  ^ String.concat "" (List.map string_of_qbeblock func.blocks)
+  ^ "}\n"
 
 let string_of_qbemodule = ""
 

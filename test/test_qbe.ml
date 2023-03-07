@@ -1,18 +1,19 @@
 
 open Qbe
 
-let res1 = Reg (wtype, "res1")
+let res1 = Reg (Word, "res1")
     
 let instrAdd01 = Add (res1, Const (IConst 2L), Const (IConst 3L))
 
 (* Doesn't need a return type, it's fixed *)
-let res2 = Reg (btype, "eqres1")
+let res2 = Reg (Byte, "eqres1")
 let instrCeqw01 = Ceqw (res2, Const (IConst 2L))
 
 let testfunc01: qbefunction = {
   name="myfunc";
+  linkage=Some (Export "");
   regctr=1;
-  rettype = wtype;
+  rettype = Some Word;
   params=[];
   blocks=[]
 }
@@ -24,5 +25,8 @@ let testblock01: qbeblock = {
           instrCeqw01]
 }
 
-let () = print_string (string_of_qbeblock testblock01)
+let () = (
+  testfunc01.blocks <- [testblock01];
+  print_string (string_of_qbefunction testfunc01)
+)
 
