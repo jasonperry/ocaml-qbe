@@ -1,2 +1,3 @@
 (test
- (name qbe))
+ (name test_qbe)
+ (libraries qbe))
