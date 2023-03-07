@@ -1,3 +1,5 @@
 (library
  (public_name qbe)
- (name qbe))
+ (name qbe)
+ (modules qbe)
+ (wrapped false))  ; It's just one module
