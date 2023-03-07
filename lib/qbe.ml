@@ -212,7 +212,6 @@ type qbeblock = {
 
 and qbefunction = {
   name: string;
-  inModule: qbemodule;
   mutable regctr: int;
   rettype: qbetype;
   params: (qbetype * string) list;
