@@ -7,9 +7,9 @@
 (source
  (github username/reponame))
 
-(authors "Author Name")
+(authors "Jason Perry")
 
-(maintainers "Maintainer Name")
+(maintainers "sh.jperry@gmail.com")
 
 (license LICENSE)
 
@@ -17,10 +17,11 @@
 
 (package
  (name qbe)
- (synopsis "A short synopsis")
- (description "A longer description")
+ (synopsis "OCaml bindings to the QBE compiler backend")
+ (description "OCaml bindings to the QBE compiler backend")
  (depends ocaml dune)
- (tags
-  (topics "to describe" your project)))
+; (tags
+  ;  (topics "to describe" your project))
+)
 
 ; See the complete stanza docs at https://dune.readthedocs.io/en/stable/dune-files.html#dune-project
