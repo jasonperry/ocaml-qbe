@@ -51,25 +51,11 @@ type qbeconst =
      store the type with the value. Or it has no type in source *)
   (* | IConst: int -> (*qbeIntegral *) 't qbeconst (* might need primitive *)
      | FConst: float -> (* qbeFloating *) 't qbeconst *)
-  | IConst of int64
-  | FConst of float (* no 32-bit floats in ocaml? Can't support them? *)
+  | LConst of int64
+  | WConst of int32
+  | SConst of float (* no 32-bit floats in ocaml, hope for the best *)
+  | DConst of float 
 
-type qbelvalue
-type qbervalue
-
-(* values carry their types with them (but constants?) *)
-(* what about in-place struct values? *)
-(* This doesn't witness anything! The type parameter can be whatever,
-   doesn't have to match the type *)
-(* type _ qbevalue =
-  (* type needs to be specified per-instance.
-     Multiple OCaml types can be a qbetype, so can't limit it.
-     Unless there were some sort of subclass thing *)
-  | Const: qbeconst -> qbervalue qbevalue
-  | Reg: qbetype * string -> qbelvalue qbevalue
-  | Global: qbetype * string -> qbelvalue qbevalue
-*)
-  
 type qbevalue =
   | Const of qbeconst
   | Reg of qbetype * string
@@ -77,129 +63,35 @@ type qbevalue =
 
 (* Idea: could at least use GADTs to diff lvalues *)
 
-(* let qTypeOf: qbevalue -> qbetype = function
+let q_typeof: qbevalue -> qbetype = function
   (* for consts we have to assume the largest type until we
      get a context. Then we have to check *)
-  | Const (IConst _) -> Primitive (Integral Long)
-  | Const (FConst _) -> Primitive (Floating Double)
+  | Const (WConst _) -> Word
+  | Const (LConst _) -> Long
+  | Const (SConst _) -> Single
+  | Const (DConst _) -> Double
   | Reg (qty, _) -> qty
   | Global (qty, _) -> qty
-*)
 
-(* store the return type? Maybe not, just let it be whatever the
-   result type is? Let the build function take the return type,
-   and choose the instruction and/or result tag! *)
-(* should the value to save go with it? instructions that save
-   have to always save? Then no separate statement type. *)
+type qbetypeinfo =
+  | Fields of (qbetype * int option) list
+  | Opaque of int (* size only *)
 
-type qbeinstr =
-  | Add of qbevalue * qbevalue * qbevalue
-  | Ceqw of qbevalue * qbevalue
-  (* Can I make the return a more general type? *)
-  (* If I remove the GADT, can I stil lhave multiple instrs of diff types? *)
-(*  | Add: qbelvalue qbevalue * 'a qbevalue * 'b qbevalue
-      -> qbelvalue qbeinstr
-  | Ceqw: qbelvalue qbevalue * 'a qbevalue
-      -> qbelvalue qbeinstr  *)
+type qbetypedef = {
+  typename: string;
+  align: int option;
+  info: qbetypeinfo
+}
 
-
-(* type _ qbeinstr =
-  | Add: string * qbelvalue qbevalue * 'a qbevalue * 'b qbevalue
-      -> qbelvalue qbeinstr
-  | Sub of string * qbetype * qbevalue * qbevalue
-  | Div of string * qbetype * qbevalue * qbevalue
-  | Mul of string * qbetype * qbevalue * qbevalue
-  | Neg of string * qbetype * qbevalue
-  | Udiv of string * qbetype * qbevalue * qbevalue
-  | Rem of string * qbetype * qbevalue * qbevalue
-  | Urem of string * qbetype * qbevalue * qbevalue
-  | Or of string * qbetype * qbevalue * qbevalue
-  | Xor of string * qbetype * qbevalue * qbevalue
-  | And of string * qbetype * qbevalue * qbevalue
-  | Sar of string * qbetype * qbevalue * qbevalue (* right is ww *)
-  | Shr of string * qbetype * qbevalue * qbevalue
-  | Shl of string * qbetype * qbevalue * qbevalue
-
-  (* When instructions have a type suffix, it means the type they
-     take is fixed. *)
-  | Stored of qbevalue * qbevalue
-  | Stores of qbevalue * qbevalue
-  | Storel of qbevalue * qbevalue
-  | Storew of qbevalue * qbevalue
-  | Storeh of qbevalue * qbevalue
-  | Storeb of qbevalue * qbevalue
-  (* how to diff between instructions that return a value and don't? *)
-  | Loadd of qbevalue
-  | Loads of qbevalue
-  | Loadl of qbevalue
-  | Loadsw of qbevalue (* sign extend *)
-  | Loaduw of qbevalue (* zero extend *)
-  | Loadsh of qbevalue
-  | Loaduh of qbevalue
-  | Loadsb of qbevalue
-  | Loadub of qbevalue
-  (* blit can be used to copy a value-type struct? *)
-  | Blit of qbevalue * qbevalue * qbevalue
-  | Alloc4 of qbevalue
-  | Alloc8 of qbevalue
-  | Alloc16 of qbevalue
-      
-  (* Comparisons - some valid only for some types *)
-  (* try to use GADTs? *)
-  | Ceqw of qbevalue * qbevalue
-  | Ceql of qbevalue * qbevalue
-  | Ceqs of qbevalue * qbevalue
-  | Ceqd of qbevalue * qbevalue
-           
-  | Cnew of qbevalue * qbevalue
-  | Cnel of qbevalue * qbevalue
-  | Cnes of qbevalue * qbevalue
-  | Cned of qbevalue * qbevalue
-           
-  | Cslew of qbevalue * qbevalue
-  | Cslel of qbevalue * qbevalue
-  | Csltw of qbevalue * qbevalue
-  | Csltl of qbevalue * qbevalue
-  | Csgew of qbevalue * qbevalue
-  | Csgel of qbevalue * qbevalue
-  | Csgtw of qbevalue * qbevalue
-  | Csgtl of qbevalue * qbevalue
-  | Culew of qbevalue * qbevalue
-  | Culel of qbevalue * qbevalue
-  | Cultw of qbevalue * qbevalue
-  | Cultl of qbevalue * qbevalue
-  | Cugew of qbevalue * qbevalue
-  | Cugel of qbevalue * qbevalue
-  | Cugtw of qbevalue * qbevalue
-  | Cugtl of qbevalue * qbevalue
-            
-  | Cled of qbevalue * qbevalue  (* float only (d and s) *)
-  | Cles of qbevalue * qbevalue  
-  | Cltd of qbevalue * qbevalue
-  | Clts of qbevalue * qbevalue
-  | Cged of qbevalue * qbevalue
-  | Cges of qbevalue * qbevalue
-  | Cgtd of qbevalue * qbevalue
-  | Cgts of qbevalue * qbevalue
-  | Cod of qbevalue * qbevalue
-  | Cos of qbevalue * qbevalue
-  | Cuod of qbevalue * qbevalue
-  | Cuos of qbevalue * qbevalue
-*)
+(* TODO: type size function (figure out padding and packing) *)
 
 type qbelinkage =
   | Export of string
   | Thread of string
   | Section of string * string * string
 
-type qbetypedef = {
-  typename: string;
-  align: int option;
-  (* type is a name either way, so just a string here. *)
-  fields: (string * int option) list
-}
 
-type  qbedataitem =
+type qbedataitem =
   | Ident of string * int option (* offset - what is it? *)
   | Const of qbeconst
   | String of string
@@ -211,6 +103,130 @@ type qbedatadef = {
   (* when emitting, can group items of same type without repeating type *)
   items: (string * qbedataitem) list
 }
+
+(* "Abi type". Should I make sure subword types are only used in funargs? *)
+type qbefunarg =
+  | Abity of qbevalue
+  | Envarg of qbevalue
+  | Variadic
+    
+(** Instructions' result values are included as the first item. They should
+    only be Regs *)
+type qbeinstr =
+  | Add of qbevalue * qbevalue * qbevalue
+  | Sub of qbevalue * qbevalue * qbevalue
+  | Div of qbevalue * qbevalue * qbevalue
+  | Mul of qbevalue * qbevalue * qbevalue
+  | Neg of qbevalue * qbevalue
+  | Udiv of qbevalue * qbevalue * qbevalue
+  | Rem of qbevalue * qbevalue * qbevalue
+  | Urem of qbevalue * qbevalue * qbevalue
+  | Or of qbevalue * qbevalue * qbevalue
+  | Xor of qbevalue * qbevalue * qbevalue
+  | And of qbevalue * qbevalue * qbevalue
+  | Sar of qbevalue * qbevalue * qbevalue
+  | Shr of qbevalue * qbevalue * qbevalue
+  | Shl of qbevalue * qbevalue * qbevalue
+  (* When instructions have a type suffix, it means the type they
+     take is fixed. *)
+  (* Store instructions take two arguments, return nothing *)
+  | Stored of qbevalue * qbevalue
+  | Stores of qbevalue * qbevalue
+  | Storel of qbevalue * qbevalue
+  | Storew of qbevalue * qbevalue
+  | Storeh of qbevalue * qbevalue
+  | Storeb of qbevalue * qbevalue
+  (* Loads take one argument, return value *)
+  | Loadd of qbevalue * qbevalue
+  | Loads of qbevalue * qbevalue
+  | Loadl of qbevalue * qbevalue
+  | Loadsw of qbevalue * qbevalue (* sign extend *)
+  | Loaduw of qbevalue * qbevalue (* zero extend *)
+  | Loadsh of qbevalue * qbevalue
+  | Loaduh of qbevalue * qbevalue
+  | Loadsb of qbevalue * qbevalue
+  | Loadub of qbevalue * qbevalue
+  (* blit can be used to copy a value-type struct, probably.
+     But memcpy calls are recommended for larger data. *)
+  | Blit of qbevalue * qbevalue * qbevalue
+  (* The int is the alignment. Returns the address. *)
+  | Alloc4 of qbevalue * qbevalue * int
+  | Alloc8 of qbevalue * qbevalue * int
+  | Alloc16 of qbevalue * qbevalue * int
+      
+  (* Comparisons - some valid only for specific types *)
+  (* but same form as arithmetic *)
+  | Ceqw of qbevalue * qbevalue * qbevalue
+  | Ceql of qbevalue * qbevalue * qbevalue
+  | Ceqs of qbevalue * qbevalue * qbevalue
+  | Ceqd of qbevalue * qbevalue * qbevalue
+  | Cnew of qbevalue * qbevalue * qbevalue
+  | Cnel of qbevalue * qbevalue * qbevalue
+  | Cnes of qbevalue * qbevalue * qbevalue
+  | Cned of qbevalue * qbevalue * qbevalue
+  (* These comparisons are signed or unsigned *)
+  | Cslew of qbevalue * qbevalue * qbevalue
+  | Cslel of qbevalue * qbevalue * qbevalue
+  | Csltw of qbevalue * qbevalue * qbevalue
+  | Csltl of qbevalue * qbevalue * qbevalue
+  | Csgew of qbevalue * qbevalue * qbevalue
+  | Csgel of qbevalue * qbevalue * qbevalue
+  | Csgtw of qbevalue * qbevalue * qbevalue
+  | Csgtl of qbevalue * qbevalue * qbevalue
+  | Culew of qbevalue * qbevalue * qbevalue
+  | Culel of qbevalue * qbevalue * qbevalue
+  | Cultw of qbevalue * qbevalue * qbevalue
+  | Cultl of qbevalue * qbevalue * qbevalue
+  | Cugew of qbevalue * qbevalue * qbevalue
+  | Cugel of qbevalue * qbevalue * qbevalue
+  | Cugtw of qbevalue * qbevalue * qbevalue
+  | Cugtl of qbevalue * qbevalue * qbevalue
+  | Cled of qbevalue * qbevalue * qbevalue  (* float only (d and s) *)
+  | Cles of qbevalue * qbevalue * qbevalue  
+  | Cltd of qbevalue * qbevalue * qbevalue
+  | Clts of qbevalue * qbevalue * qbevalue
+  | Cged of qbevalue * qbevalue * qbevalue
+  | Cges of qbevalue * qbevalue * qbevalue
+  | Cgtd of qbevalue * qbevalue * qbevalue
+  | Cgts of qbevalue * qbevalue * qbevalue
+  | Cod of qbevalue * qbevalue * qbevalue
+  | Cos of qbevalue * qbevalue * qbevalue
+  | Cuod of qbevalue * qbevalue * qbevalue
+  | Cuos of qbevalue * qbevalue * qbevalue
+  (* Conversions *)
+  (* Integer sign extension (truncation not needed) *)
+  | Extsw of qbevalue * qbevalue
+  | Extuw of qbevalue * qbevalue
+  | Extsh of qbevalue * qbevalue
+  | Extuh of qbevalue * qbevalue
+  | Extsb of qbevalue * qbevalue
+  | Extub of qbevalue * qbevalue
+  (* Float extension and truncation *)
+  | Exts of qbevalue * qbevalue
+  | Truncd of qbevalue * qbevalue
+  (* float-to-integer *)
+  | Stosi of qbevalue * qbevalue
+  | Stoui of qbevalue * qbevalue
+  | Dtosi of qbevalue * qbevalue
+  | Dtoui of qbevalue * qbevalue
+  (* integer-to-float *)
+  | Swtof of qbevalue * qbevalue
+  | Uwtof of qbevalue * qbevalue
+  | Sltof of qbevalue * qbevalue
+  | Ultof of qbevalue * qbevalue
+  (* Cast bitwise int to float*)
+  | Cast of qbevalue * qbevalue
+  | Copy of qbevalue * qbevalue
+  (* Call-related *)
+  | Call of qbevalue option * string * qbefunarg list
+  | Vastart of qbevalue (* type is ignored *)
+  | Vaarg of qbevalue * qbevalue
+  | Phi of qbevalue * (string * int) list
+  | Jmp of string
+  | Jnz of qbevalue * string * string
+  | Ret of qbevalue option
+  | Hlt
+
 
 type qbeblock = {
   label: string;
@@ -243,46 +259,74 @@ and qbemodule = {
 (* or just take a string that's ONLY a reg and add the number always? *)
 (* do I have to store globals? *)
 
-(** build functions take a string as lvalue and generate a unique register *)
-let buildAdd theBlock lval rettype v1 v2 =
+let insert_instr theBlock inst =
+  theBlock.instrs <- theBlock.instrs @ [inst]  
+
+(** Takes a template for any reg-result instruction. *)
+let build_reginst ifunc theBlock resname resty = 
   let theFunc = theBlock.inFunction in
-  let lvalReg = Reg (rettype, lval ^ (string_of_int theFunc.regctr)) in
-  let addInst = Add (lvalReg, v1, v2) in
+  let resReg = Reg (resty, resname ^ (string_of_int theFunc.regctr)) in
+  let theInst = ifunc resReg in
   (* this part can be factored out at least. *)
   (theFunc.regctr <- theFunc.regctr + 1;
-   theBlock.instrs <- theBlock.instrs @ [addInst];
-   lval)
+   theBlock.instrs <- theBlock.instrs @ [theInst];
+   resReg)
+
+(* build functions take a string as lvalue and generate a unique register *)
+
+let build_add theBlock resname restype v1 v2 =
+  build_reginst (fun x -> Add (x, v1, v2)) theBlock resname restype
+
+(** Type must be specified for a store because storeh and storeb take
+    a word type value *)
+let build_store theBlock valty v addr =
+  match valty with
+  | Word -> insert_instr theBlock (Storew (v, addr))
+  | Long -> insert_instr theBlock (Storel (v, addr))
+  | Byte -> insert_instr theBlock (Storeb (v, addr))
+  | Halfword -> insert_instr theBlock (Storeh (v, addr))
+  | Single -> insert_instr theBlock (Stores (v, addr))
+  | Double -> insert_instr theBlock (Stored (v, addr))
+  | Struct _ -> raise (BadQBE "Cannot store aggregate types")
+
+let build_load theBlock resname valty addr =
+  match valty with
+  | Long -> build_reginst (fun x -> Loadl (x, addr)) theBlock resname valty
+  | Single -> build_reginst (fun x -> Loads (x, addr)) theBlock resname valty
+  | Double -> build_reginst (fun x -> Loadd (x, addr)) theBlock resname valty
+  | Struct _ -> raise (BadQBE "Cannot load aggregate types")
+  | _ -> raise (BadQBE "Short int types need loads or loadu")
+
+(** Loads on shorter int types always store to a word. *)
+let build_loadu theBlock resname valty addr =
+  match valty with
+  | Word -> build_reginst (fun x -> Loaduw (x, addr)) theBlock resname Word
+  | Halfword -> build_reginst (fun x -> Loaduh (x, addr)) theBlock resname Word
+  | Byte -> build_reginst (fun x -> Loadub (x, addr)) theBlock resname Word
+  | _ -> raise (BadQBE "Invalid type for short-int load")
+
+(* Should I combine this and the above with a flag? *)
+let build_loads theBlock resname valty addr =
+  match valty with
+  | Word -> build_reginst (fun x -> Loadsw (x, addr)) theBlock resname Word
+  | Halfword -> build_reginst (fun x -> Loadsh (x, addr)) theBlock resname Word
+  | Byte -> build_reginst (fun x -> Loadsb (x, addr)) theBlock resname Word
+  | _ -> raise (BadQBE "Invalid type for short-int load")
 
 
-(* instruction builders *)
-(* Or, I could just spit it out and let QBE tell me it's wrong. Duh. *)
-(* Then build is just for adding it to the module and what I get
-   back is the result value to use. *)
-(* let buildAdd theMod reg v1 v2 =
-  match qTypeOf v1 with
-  | Struct _ ->
-    raise (BadQBE "Illegal operation: cannot add struct type")
-  (* How would I use the GADT info that it's primitive? *)
-  | Primitive v1qty -> (
-      match qTypeOf v2 with
-      | Struct _ -> 
-        raise (BadQBE "Illegal operation: cannot add struct type")
-      | Primitive v2qty ->
-        if v1qty <> v2qty then
-          if (v1qty == wtype && v2qty == ltype
-              || v1qty == ltype && v2qty == wtype) then
-            (* oh, what if I store it in a global? *)
-            (theMod.regctr <- theMod.regctr + 1; 
-             Add (reg ^ string_of_int theMod.regctr, wtype, v1, v2))
-          else
-            (* No wait, constants can be interpreted as any size *)
-            raise (BadQBE "Incompatible types for add")
-        else
-          (theMod.regctr <- theMod.regctr + 1; 
-           Add (reg ^ string_of_int theMod.regctr, v1qty, v1, v2)))
-*)
-
+(** This builder uses the type of the first argument to select the
+    specific comparison instruction. *)
+let build_eq theBlock resname restype v1 v2 =
+  match q_typeof v1 with
+  | Word -> build_reginst (fun x -> Ceqw (x, v1, v2)) theBlock resname restype
+  | Long -> build_reginst (fun x -> Ceql (x, v1, v2)) theBlock resname restype
+  | Single -> build_reginst (fun x -> Ceqs (x, v1, v2)) theBlock resname restype
+  | Double -> build_reginst (fun x -> Ceqd (x, v1, v2)) theBlock resname restype
+  | _ -> raise (BadQBE "Illegal type for eq comparison instruction")
+ 
+(* ------------------- *)
 (* string_of functions *)
+(* ------------------- *)
 
 let string_of_qbetype = function
   | Word -> "w"
@@ -293,6 +337,7 @@ let string_of_qbetype = function
   | Double -> "d"
   | Struct name -> ":" ^ name
 
+(* TODO: handle other arguments to Section. *)
 let string_of_qbelinkage = function
   | Export nm ->
     "export " ^ (if nm <> "" then nm ^ " " else "")
@@ -301,15 +346,70 @@ let string_of_qbelinkage = function
   | Section (nm, _, _) ->
     "section " ^ (if nm <> "" then nm ^ " " else "")
 
-let string_of_qbeinstr = "" (* see sprintf *)
-
 (* "explicit polymorphic annotation" *)
 let string_of_qbevalue : (*type t. t*) qbevalue -> string = function
   (* type markers aren't on the constant *)
-  | Const (IConst n) -> Int64.to_string n
-  | Const (FConst x) -> string_of_float x
-  | Reg (ty, rname) -> string_of_qbetype ty ^ " %" ^ rname
-  | Global (ty, gname) -> string_of_qbetype ty ^ " $" ^ gname
+  | Const (WConst n) -> Int32.to_string n
+  | Const (LConst n) -> Int64.to_string n
+  | Const (SConst x) -> "s_" ^ string_of_float x
+  | Const (DConst x) -> "d_" ^ string_of_float x
+  (* Types aren't normally printed with values *)
+  | Reg (_, rname) -> "%" ^ rname
+  | Global (_, gname) -> "$" ^ gname
+
+let string_of_binop iname lval op1 op2 =
+  Printf.sprintf("%s =%s %s %s, %s\n")
+    (string_of_qbevalue lval)
+    (string_of_qbetype (q_typeof lval))
+    iname
+    (string_of_qbevalue op1)
+    (string_of_qbevalue op2)
+
+let string_of_unop iname lval op =
+  Printf.sprintf("%s =%s %s %s\n")
+    (string_of_qbevalue lval)
+    (string_of_qbetype (q_typeof lval))
+    iname
+    (string_of_qbevalue op)
+
+let string_of_store iname v addr =
+  Printf.sprintf("%s %s, %s")
+    iname
+    (string_of_qbevalue v)
+    (string_of_qbevalue addr)
+    
+
+let string_of_qbeinstr = function
+  | Add (lval, op1, op2) -> string_of_binop "add" lval op1 op2
+  | Sub (lval, op1, op2) -> string_of_binop "sub" lval op1 op2
+  | Div (lval, op1, op2) -> string_of_binop "div" lval op1 op2
+  | Mul (lval, op1, op2) -> string_of_binop "mul" lval op1 op2
+  | Udiv (lval, op1, op2) -> string_of_binop "udiv" lval op1 op2
+  | Rem (lval, op1, op2) -> string_of_binop "rem" lval op1 op2
+  | Urem (lval, op1, op2) -> string_of_binop "urem" lval op1 op2
+  | Or (lval, op1, op2) -> string_of_binop "or" lval op1 op2
+  | Xor (lval, op1, op2) -> string_of_binop "xor" lval op1 op2
+  | And (lval, op1, op2) -> string_of_binop "and" lval op1 op2
+  | Sar (lval, op1, op2) -> string_of_binop "sar" lval op1 op2
+  | Shr (lval, op1, op2) -> string_of_binop "shr" lval op1 op2
+  | Shl (lval, op1, op2) -> string_of_binop "shl" lval op1 op2
+  | Neg (lval, op) -> string_of_unop "neg" lval op
+  | Storel (v, addr) -> string_of_store "storel" v addr
+  | Stores (v, addr) -> string_of_store "stores" v addr
+  | Stored (v, addr) -> string_of_store "stored" v addr
+  | Storew (v, addr) -> string_of_store "storew" v addr
+  | Storeh (v, addr) -> string_of_store "storeh" v addr
+  | Storeb (v, addr) -> string_of_store "storeb" v addr
+  | Loadl (lval, addr) -> string_of_unop "loadl" lval addr
+  | Loads (lval, addr) -> string_of_unop "loads" lval addr
+  | Loadd (lval, addr) -> string_of_unop "loadd" lval addr
+  | Loadsw (lval, addr) -> string_of_unop "loadsw" lval addr
+  | Loaduw (lval, addr) -> string_of_unop "loaduw" lval addr
+  | Loadsh (lval, addr) -> string_of_unop "loadsh" lval addr
+  | Loaduh (lval, addr) -> string_of_unop "loaduh" lval addr
+  | Loadsb (lval, addr) -> string_of_unop "loadsb" lval addr
+  | Loadub (lval, addr) -> string_of_unop "loadub" lval addr
+  | _ -> failwith "hold on a bit"
 
 let string_of_qbeblock blk =
   if blk.label = "start"
