@@ -150,9 +150,9 @@ type qbeinstr =
      But memcpy calls are recommended for larger data. *)
   | Blit of qbevalue * qbevalue * qbevalue
   (* The int is the alignment. Returns the address. *)
-  | Alloc4 of qbevalue * qbevalue * int
-  | Alloc8 of qbevalue * qbevalue * int
-  | Alloc16 of qbevalue * qbevalue * int
+  | Alloc4 of qbevalue * qbevalue
+  | Alloc8 of qbevalue * qbevalue
+  | Alloc16 of qbevalue * qbevalue
       
   (* Comparisons - some valid only for specific types *)
   (* but same form as arithmetic *)
@@ -283,12 +283,14 @@ let build_store theBlock valty v addr =
   match valty with
   | Word -> insert_instr theBlock (Storew (v, addr))
   | Long -> insert_instr theBlock (Storel (v, addr))
+  (* partial-word types still take a word as argument. *)
   | Byte -> insert_instr theBlock (Storeb (v, addr))
   | Halfword -> insert_instr theBlock (Storeh (v, addr))
   | Single -> insert_instr theBlock (Stores (v, addr))
   | Double -> insert_instr theBlock (Stored (v, addr))
   | Struct _ -> raise (BadQBE "Cannot store aggregate types")
 
+(** Loads for full-size types into same size target *)
 let build_load theBlock resname valty addr =
   match valty with
   | Long -> build_reginst (fun x -> Loadl (x, addr)) theBlock resname valty
@@ -297,22 +299,45 @@ let build_load theBlock resname valty addr =
   | Struct _ -> raise (BadQBE "Cannot load aggregate types")
   | _ -> raise (BadQBE "Short int types need loads or loadu")
 
-(** Loads on shorter int types always store to a word. *)
-let build_loadu theBlock resname valty addr =
+(* Loading shorter types into longer needs specification of sign
+   behavior *)
+(* Should I combine the signed and unsigned functions with a flag? *)
+let build_loads theBlock resname valty resty addr =
   match valty with
-  | Word -> build_reginst (fun x -> Loaduw (x, addr)) theBlock resname Word
-  | Halfword -> build_reginst (fun x -> Loaduh (x, addr)) theBlock resname Word
-  | Byte -> build_reginst (fun x -> Loadub (x, addr)) theBlock resname Word
+  | Word -> build_reginst (fun x -> Loadsw (x, addr)) theBlock resname resty
+  | Halfword -> build_reginst (fun x -> Loadsh (x, addr)) theBlock resname resty
+  | Byte -> build_reginst (fun x -> Loadsb (x, addr)) theBlock resname resty
   | _ -> raise (BadQBE "Invalid type for short-int load")
 
-(* Should I combine this and the above with a flag? *)
-let build_loads theBlock resname valty addr =
+let build_loadu theBlock resname resty valty addr =
+  (* Can only save in a Word or Long. We can let QBE catch that mistake? *)
   match valty with
-  | Word -> build_reginst (fun x -> Loadsw (x, addr)) theBlock resname Word
-  | Halfword -> build_reginst (fun x -> Loadsh (x, addr)) theBlock resname Word
-  | Byte -> build_reginst (fun x -> Loadsb (x, addr)) theBlock resname Word
+  | Word -> build_reginst (fun x -> Loaduw (x, addr)) theBlock resname resty
+  | Halfword -> build_reginst (fun x -> Loaduh (x, addr)) theBlock resname resty
+  | Byte -> build_reginst (fun x -> Loadub (x, addr)) theBlock resname resty
   | _ -> raise (BadQBE "Invalid type for short-int load")
 
+let build_blit theBlock src dest len =
+  let theInst = Blit (src, dest, len) in
+  insert_instr theBlock theInst
+
+(** Stack allocation; size is dynamic (a qbevalue), alignment must be 4,
+    8, or 16 *)
+let build_alloc theBlock resname align size =
+  (* size must be a long. *)
+  (* the result pointer type depends on architecture.
+     Start with 64-bit hardcoded, think later about how to fix. *)
+  let theInst = match align with
+    | 4 -> (fun r -> Alloc4 (r, size))
+    | 8 -> (fun r -> Alloc8 (r, size))
+    | 16 -> (fun r -> Alloc16 (r, size))
+    | _ -> raise (BadQBE "Illegal alignment size, must be 4, 8, or 16")
+  in
+  build_reginst theInst theBlock resname Long
+
+(* Should I put the comparison builders in one function? It seems harder
+   to use because the caller then has to remember some comparison types. *)
+  
 
 (** This builder uses the type of the first argument to select the
     specific comparison instruction. *)
