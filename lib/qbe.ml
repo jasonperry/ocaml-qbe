@@ -74,7 +74,7 @@ let q_typeof: qbevalue -> qbetype = function
   | Global (qty, _) -> qty
 
 type qbetypeinfo =
-  | Fields of (qbetype * int option) list
+  | Fields of (qbetype * int) list  (* field type and count *)
   | Opaque of int (* size only *)
 
 type qbetypedef = {
@@ -86,22 +86,23 @@ type qbetypedef = {
 (* TODO: type size function (figure out padding and packing) *)
 
 type qbelinkage =
-  | Export of string
-  | Thread of string
-  | Section of string * string * string
+  | Export
+  | Thread
+  | Section of string * string
 
 
 type qbedataitem =
-  | Ident of string * int option (* offset - what is it? *)
+  | Ident of string * int option (* offset - for padding? *)
   | Const of qbeconst
   | String of string
+  | Z of int
 
 type qbedatadef = {
   linkage: qbelinkage list;
   name: string;
   align: int option;
   (* when emitting, can group items of same type without repeating type *)
-  items: (string * qbedataitem) list
+  items: (qbetype * qbedataitem) list
 }
 
 (* "Abi type". Should I make sure subword types are only used in funargs? *)
@@ -362,15 +363,32 @@ let string_of_qbetype = function
   | Double -> "d"
   | Struct name -> ":" ^ name
 
-(* TODO: handle other arguments to Section. *)
-let string_of_qbelinkage = function
-  | Export nm ->
-    "export " ^ (if nm <> "" then nm ^ " " else "")
-  | Thread nm ->
-    "thread " ^ (if nm <> "" then nm ^ " " else "")
-  | Section (nm, _, _) ->
-    "section " ^ (if nm <> "" then nm ^ " " else "")
+let string_of_qbetypedef tdef =
+  "type :" ^ tdef.typename ^ " = "
+  ^ (match tdef.align with
+      | Some align -> "align " ^ string_of_int align
+      | None -> "")
+  ^ " { "
+  ^ (match tdef.info with
+      | Fields flist ->
+        String.concat ", "
+          (List.map (fun (qty, count) ->
+               string_of_qbetype qty
+               ^ (if count > 1 then (" " ^ string_of_int count)
+                  else "")
+             ) flist)
+      | Opaque size -> string_of_int size)
+    ^ " }"
 
+let string_of_qbelinkage = function
+  | Export -> "export"
+  | Thread -> "thread"
+  | Section (sname, sflags) ->
+    "section"
+    ^ (if sname <> "" then (" \"" ^ sname ^ "\"") else "")
+    ^ (if sflags <> "" then (" \"" ^ sflags ^ "\"") else "")
+       
+    
 (* "explicit polymorphic annotation" *)
 let string_of_qbevalue : (*type t. t*) qbevalue -> string = function
   (* type markers aren't on the constant *)
@@ -383,6 +401,27 @@ let string_of_qbevalue : (*type t. t*) qbevalue -> string = function
   | Global (_, gname) -> "$" ^ gname
 
 
+let string_of_qbedatadef (ddef: qbedatadef) =
+  (String.concat " " (List.map string_of_qbelinkage ddef.linkage))
+  ^ "data $" ^ ddef.name ^ " = "
+  ^ (match ddef.align with
+      | Some ai -> "align " ^ string_of_int ai ^ " "
+      | None -> "")
+  ^ " { " ^ String.concat ", "
+    (List.map (fun (ty, item) -> match item with
+         | Ident (ident, offopt) ->
+           string_of_qbetype ty ^ " $" ^ ident
+           ^ (match offopt with
+               | Some offset -> " + " ^ string_of_int offset
+               | None -> "")
+         | Const const ->
+           string_of_qbetype ty ^ " " ^ string_of_qbevalue (Const const)
+         (* string is always byte type, right? *)
+         | String sval -> "b \"" ^ sval ^ "\""
+         | Z nbytes -> "z " ^ string_of_int nbytes)
+        ddef.items)
+
+
 let string_of_qbeinstr theInstr = 
   let soi iname lvopt args =
     (match lvopt with
@@ -391,7 +430,7 @@ let string_of_qbeinstr theInstr =
        ^ string_of_qbetype (q_typeof lval) ^ " "
      | None -> "")
     ^ iname ^ " "
-    ^ String.concat ", " (List.map string_of_qbevalue args) ^ "\n"
+    ^ String.concat ", " (List.map string_of_qbevalue args)
   in
   match theInstr with 
   | Add (lval, op1, op2) -> soi "add" (Some lval) [op1; op2]
@@ -436,11 +475,12 @@ let string_of_qbeblock blk =
   then raise (BadQBE "Label name @start reserved for function entry point")
   else 
     "@" ^ blk.label ^ "\n"
+    ^ String.concat "\n" (List.map string_of_qbeinstr blk.instrs)
 
 let string_of_qbefunction func =
   (match func.linkage with
    | None -> ""
-   | Some lnk -> string_of_qbelinkage lnk)
+   | Some lnk -> string_of_qbelinkage lnk ^ " ")
   ^ "function " 
   ^ (match func.rettype with
       | Some rty -> string_of_qbetype rty
@@ -454,7 +494,9 @@ let string_of_qbefunction func =
   ^ String.concat "" (List.map string_of_qbeblock func.blocks)
   ^ "}\n"
 
-let string_of_qbemodule = ""
+let string_of_qbemodule theMod =
+  String.concat "\n" (List.map string_of_qbetypedef theMod.typedefs)
+  ^ String.concat "\n" (List.map string_of_qbefunction theMod.functions)
 
 (* not in first pass: "section" directive? *)
 
