@@ -382,59 +382,53 @@ let string_of_qbevalue : (*type t. t*) qbevalue -> string = function
   | Reg (_, rname) -> "%" ^ rname
   | Global (_, gname) -> "$" ^ gname
 
-let string_of_binop iname lval op1 op2 =
-  Printf.sprintf("%s =%s %s %s, %s\n")
-    (string_of_qbevalue lval)
-    (string_of_qbetype (q_typeof lval))
-    iname
-    (string_of_qbevalue op1)
-    (string_of_qbevalue op2)
 
-let string_of_unop iname lval op =
-  Printf.sprintf("%s =%s %s %s\n")
-    (string_of_qbevalue lval)
-    (string_of_qbetype (q_typeof lval))
-    iname
-    (string_of_qbevalue op)
-
-let string_of_store iname v addr =
-  Printf.sprintf("%s %s, %s")
-    iname
-    (string_of_qbevalue v)
-    (string_of_qbevalue addr)
-    
-
-let string_of_qbeinstr = function
-  | Add (lval, op1, op2) -> string_of_binop "add" lval op1 op2
-  | Sub (lval, op1, op2) -> string_of_binop "sub" lval op1 op2
-  | Div (lval, op1, op2) -> string_of_binop "div" lval op1 op2
-  | Mul (lval, op1, op2) -> string_of_binop "mul" lval op1 op2
-  | Udiv (lval, op1, op2) -> string_of_binop "udiv" lval op1 op2
-  | Rem (lval, op1, op2) -> string_of_binop "rem" lval op1 op2
-  | Urem (lval, op1, op2) -> string_of_binop "urem" lval op1 op2
-  | Or (lval, op1, op2) -> string_of_binop "or" lval op1 op2
-  | Xor (lval, op1, op2) -> string_of_binop "xor" lval op1 op2
-  | And (lval, op1, op2) -> string_of_binop "and" lval op1 op2
-  | Sar (lval, op1, op2) -> string_of_binop "sar" lval op1 op2
-  | Shr (lval, op1, op2) -> string_of_binop "shr" lval op1 op2
-  | Shl (lval, op1, op2) -> string_of_binop "shl" lval op1 op2
-  | Neg (lval, op) -> string_of_unop "neg" lval op
-  | Storel (v, addr) -> string_of_store "storel" v addr
-  | Stores (v, addr) -> string_of_store "stores" v addr
-  | Stored (v, addr) -> string_of_store "stored" v addr
-  | Storew (v, addr) -> string_of_store "storew" v addr
-  | Storeh (v, addr) -> string_of_store "storeh" v addr
-  | Storeb (v, addr) -> string_of_store "storeb" v addr
-  | Loadl (lval, addr) -> string_of_unop "loadl" lval addr
-  | Loads (lval, addr) -> string_of_unop "loads" lval addr
-  | Loadd (lval, addr) -> string_of_unop "loadd" lval addr
-  | Loadsw (lval, addr) -> string_of_unop "loadsw" lval addr
-  | Loaduw (lval, addr) -> string_of_unop "loaduw" lval addr
-  | Loadsh (lval, addr) -> string_of_unop "loadsh" lval addr
-  | Loaduh (lval, addr) -> string_of_unop "loaduh" lval addr
-  | Loadsb (lval, addr) -> string_of_unop "loadsb" lval addr
-  | Loadub (lval, addr) -> string_of_unop "loadub" lval addr
+let string_of_qbeinstr theInstr = 
+  let soi iname lvopt args =
+    (match lvopt with
+     | Some lval ->
+       (string_of_qbevalue lval) ^ " ="
+       ^ string_of_qbetype (q_typeof lval) ^ " "
+     | None -> "")
+    ^ iname ^ " "
+    ^ String.concat ", " (List.map string_of_qbevalue args) ^ "\n"
+  in
+  match theInstr with 
+  | Add (lval, op1, op2) -> soi "add" (Some lval) [op1; op2]
+  | Sub (lval, op1, op2) -> soi "sub" (Some lval) [op1; op2]
+  | Div (lval, op1, op2) -> soi "div" (Some lval) [op1; op2]
+  | Mul (lval, op1, op2) -> soi "mul" (Some lval) [op1; op2]
+  | Udiv (lval, op1, op2) -> soi "udiv" (Some lval) [op1; op2]
+  | Rem (lval, op1, op2) -> soi "rem" (Some lval) [op1; op2]
+  | Urem (lval, op1, op2) -> soi "urem" (Some lval) [op1; op2]
+  | Or (lval, op1, op2) -> soi "or" (Some lval) [op1; op2]
+  | Xor (lval, op1, op2) -> soi "xor" (Some lval) [op1; op2]
+  | And (lval, op1, op2) -> soi "and" (Some lval) [op1; op2]
+  | Sar (lval, op1, op2) -> soi "sar" (Some lval) [op1; op2]
+  | Shr (lval, op1, op2) -> soi "shr" (Some lval) [op1; op2]
+  | Shl (lval, op1, op2) -> soi "shl" (Some lval) [op1; op2]
+  | Neg (lval, op) -> soi "neg" (Some lval) [op]
+  | Storel (v, addr) -> soi "storel" None [v; addr]
+  | Stores (v, addr) -> soi "stores" None [v; addr]
+  | Stored (v, addr) -> soi "stored" None [v; addr]
+  | Storew (v, addr) -> soi "storew" None [v; addr]
+  | Storeh (v, addr) -> soi "storeh" None [v; addr]
+  | Storeb (v, addr) -> soi "storeb" None [v; addr]
+  | Loadl (lval, addr) -> soi "loadl" (Some lval) [addr]
+  | Loads (lval, addr) -> soi "loads" (Some lval) [addr]
+  | Loadd (lval, addr) -> soi "loadd" (Some lval) [addr]
+  | Loadsw (lval, addr) -> soi "loadsw" (Some lval) [addr]
+  | Loaduw (lval, addr) -> soi "loaduw" (Some lval) [addr]
+  | Loadsh (lval, addr) -> soi "loadsh" (Some lval) [addr]
+  | Loaduh (lval, addr) -> soi "loaduh" (Some lval) [addr]
+  | Loadsb (lval, addr) -> soi "loadsb" (Some lval) [addr]
+  | Loadub (lval, addr) -> soi "loadub" (Some lval) [addr]
+  | Blit (a1, a2, n) -> soi "blit" None [a1; a2; n]
+  | Alloc4 (lval, size) -> soi "alloc4" (Some lval) [size]
+  | Alloc8 (lval, size) -> soi "alloc8" (Some lval) [size]
+  | Alloc16 (lval, size) -> soi "alloc16" (Some lval) [size]
   | _ -> failwith "hold on a bit"
+
 
 let string_of_qbeblock blk =
   if blk.label = "start"
