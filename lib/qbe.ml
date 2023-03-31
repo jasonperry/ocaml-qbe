@@ -1,32 +1,7 @@
-
-(* I don't need to model constants themselves, because they will be
-   specified in the codegen directly? *)
+(** Types and functions for emitting QBE IR code. *)
 
 exception BadQBE of string
 
-(* type qbeIntegral =
-  | Word
-  | Long
-  | Byte
-  | Halfword
-
-(* could I use polymorphic variants to include these under a
-   single umbrella? *)
-
-type qbeFloating =
-  | Single
-  | Double
-
-type qbePrimitive =
-  | Integral of qbeIntegral
-  | Floating of qbeFloating
-
-type qbetype =
-  | Primitive of qbePrimitive
-  (* no in-place types, right? *)
-  | Struct of string (* just use name *)
-      (* string * int * qbetype list (* int is alignment *) *)
-*)
 type qbetype =
   | Word
   | Long
@@ -36,23 +11,10 @@ type qbetype =
   | Double
   | Struct of string
 
-(*let wtype = Primitive (Integral Word)
-let ltype = Primitive (Integral Long)
-let btype = Primitive (Integral Byte)
-let htype = Primitive (Integral Halfword)
-let stype = Primitive (Floating Single)
-  let dtype = Primitive (Floating Double) *)
-
-
-(* Do I witness this? "type value associated with constructed value" *)
-(* How I say that Integral "is-a" primitive, etc.? *)
 type qbeconst =
-  (* wait, can I just have one of all the int types? Then I'd just
-     store the type with the value. Or it has no type in source *)
-  (* | IConst: int -> (*qbeIntegral *) 't qbeconst (* might need primitive *)
-     | FConst: float -> (* qbeFloating *) 't qbeconst *)
-  | LConst of int64
+  (* Decided to have a separate case for each constant type. *)
   | WConst of int32
+  | LConst of int64
   | SConst of float (* no 32-bit floats in ocaml, hope for the best *)
   | DConst of float 
 
@@ -93,7 +55,7 @@ type qbelinkage =
 
 type qbedataitem =
   | Ident of string * int option (* offset - for padding? *)
-  | Const of qbeconst
+  | Const of qbetype * qbeconst list (* must be nonempty *)
   | String of string
   | Z of int
 
@@ -102,7 +64,7 @@ type qbedatadef = {
   name: string;
   align: int option;
   (* when emitting, can group items of same type without repeating type *)
-  items: (qbetype * qbedataitem) list
+  items: qbedataitem list
 }
 
 (* "Abi type". Should I make sure subword types are only used in funargs? *)
@@ -246,22 +208,57 @@ and qbefunction = {
 }
 
 and qbemodule = {
-  typedefs: qbetypedef list;
+  mutable typedefs: qbetypedef list;
   (* are these the only globals? Can they be mutated? *)
-  datadefs: qbedatadef list; 
-  functions: qbefunction list
+  mutable datadefs: qbedatadef list; 
+  mutable functions: qbefunction list
 }
 
 
-(* 'emit' functions can go here and return the result value *)
-(* new lighter build-add *)
-(* what do we pass in for the result? *)
-(* how about just take a string and parse it if it's a reg? *)
-(* or just take a string that's ONLY a reg and add the number always? *)
-(* do I have to store globals? *)
+(* ---------------------------------------------------------------- *)
+(* Functions for adding program elements to the mutable structures. *)
+(* ---------------------------------------------------------------- *)
+
+(* how to copy one? Does making it a thunk make any difference? *)
+let new_module () = {
+  typedefs = [];
+  datadefs = [];
+  functions = []
+}
+
+let add_function theModule fname rettype params =
+  let theFunction = {
+    name = fname;
+    linkage = Some Export;  (* todo: allow specifying *)
+    regctr = 0;
+    rettype = rettype;
+    params = params;
+    blocks = []
+  } in
+  theModule.functions <- theModule.functions @ [theFunction];
+  theFunction
+
+(** Create a block and add it to a function. *)
+let add_block func blockname =
+  let theBlock = {
+    label=blockname;
+    inFunction = func;
+    instrs = []
+  } in
+  func.blocks <- func.blocks @ [theBlock];
+  theBlock
+
+
+(* then, function to create a module *)
+
 
 let insert_instr theBlock inst =
   theBlock.instrs <- theBlock.instrs @ [inst]  
+
+
+(* ---------------------------------------------- *)
+(* Functions for building individual instructions *)
+(* ---------------------------------------------- *)
 
 (** Takes a template for any reg-result instruction. *)
 let build_reginst ifunc theBlock resname resty = 
@@ -336,20 +333,157 @@ let build_alloc theBlock resname align size =
   in
   build_reginst theInst theBlock resname Long
 
-(* Should I put the comparison builders in one function? It seems harder
-   to use because the caller then has to remember some comparison types. *)
-  
-
-(** This builder uses the type of the first argument to select the
-    specific comparison instruction. *)
-let build_eq theBlock resname restype v1 v2 =
+(* Okay, let's try detecting the type *)
+(* BUT you can use a long with a word and it's a word. Not fully general *)
+let build_ceq theBlock resname resty v1 v2 =
   match q_typeof v1 with
-  | Word -> build_reginst (fun x -> Ceqw (x, v1, v2)) theBlock resname restype
-  | Long -> build_reginst (fun x -> Ceql (x, v1, v2)) theBlock resname restype
-  | Single -> build_reginst (fun x -> Ceqs (x, v1, v2)) theBlock resname restype
-  | Double -> build_reginst (fun x -> Ceqd (x, v1, v2)) theBlock resname restype
-  | _ -> raise (BadQBE "Illegal type for eq comparison instruction")
- 
+  | Word -> build_reginst (fun x -> Ceqw (x, v1, v2)) theBlock resname resty
+  | Long -> build_reginst (fun x -> Ceql (x, v1, v2)) theBlock resname resty
+  | Single -> build_reginst (fun x -> Ceqs (x, v1, v2)) theBlock resname resty
+  | Double -> build_reginst (fun x -> Ceqd (x, v1, v2)) theBlock resname resty
+  | _ -> raise (BadQBE "Illegal type for equality comparison")
+
+let build_cne theBlock resname resty v1 v2 =
+  match q_typeof v1 with
+  | Word -> build_reginst (fun x -> Cnew (x, v1, v2)) theBlock resname resty
+  | Long -> build_reginst (fun x -> Cnel (x, v1, v2)) theBlock resname resty
+  | Single -> build_reginst (fun x -> Cnes (x, v1, v2)) theBlock resname resty
+  | Double -> build_reginst (fun x -> Cned (x, v1, v2)) theBlock resname resty
+  | _ -> raise (BadQBE "Illegal type for equality comparison")
+
+let build_csle theBlock resname resty v1 v2 =
+  match q_typeof v1 with
+  | Word -> build_reginst (fun x -> Cslew (x, v1, v2)) theBlock resname resty
+  | Long -> build_reginst (fun x -> Cslel (x, v1, v2)) theBlock resname resty
+  | _ -> raise (BadQBE "Illegal type for LE comparison")
+
+let build_cslt theBlock resname resty v1 v2 =
+  match q_typeof v1 with
+  | Word -> build_reginst (fun x -> Csltw (x, v1, v2)) theBlock resname resty
+  | Long -> build_reginst (fun x -> Csltl (x, v1, v2)) theBlock resname resty
+  | _ -> raise (BadQBE "Illegal type for LT comparison")
+
+let build_csge theBlock resname resty v1 v2 =
+  match q_typeof v1 with
+  | Word -> build_reginst (fun x -> Csgew (x, v1, v2)) theBlock resname resty
+  | Long -> build_reginst (fun x -> Csgel (x, v1, v2)) theBlock resname resty
+  | _ -> raise (BadQBE "Illegal type for GE comparison")
+
+let build_csgt theBlock resname resty v1 v2 =
+  match q_typeof v1 with
+  | Word -> build_reginst (fun x -> Csgtw (x, v1, v2)) theBlock resname resty
+  | Long -> build_reginst (fun x -> Csgtl (x, v1, v2)) theBlock resname resty
+  | _ -> raise (BadQBE "Illegal type for GT comparison")
+
+
+let build_cule theBlock resname resty v1 v2 =
+  match q_typeof v1 with
+  | Word -> build_reginst (fun x -> Culew (x, v1, v2)) theBlock resname resty
+  | Long -> build_reginst (fun x -> Culel (x, v1, v2)) theBlock resname resty
+  | _ -> raise (BadQBE "Illegal type for LE comparison")
+
+let build_cult theBlock resname resty v1 v2 =
+  match q_typeof v1 with
+  | Word -> build_reginst (fun x -> Cultw (x, v1, v2)) theBlock resname resty
+  | Long -> build_reginst (fun x -> Cultl (x, v1, v2)) theBlock resname resty
+  | _ -> raise (BadQBE "Illegal type for LT comparison")
+
+let build_cuge theBlock resname resty v1 v2 =
+  match q_typeof v1 with
+  | Word -> build_reginst (fun x -> Cugew (x, v1, v2)) theBlock resname resty
+  | Long -> build_reginst (fun x -> Cugel (x, v1, v2)) theBlock resname resty
+  | _ -> raise (BadQBE "Illegal type for GE comparison")
+
+let build_cugt theBlock resname resty v1 v2 =
+  match q_typeof v1 with
+  | Word -> build_reginst (fun x -> Cugtw (x, v1, v2)) theBlock resname resty
+  | Long -> build_reginst (fun x -> Cugtl (x, v1, v2)) theBlock resname resty
+  | _ -> raise (BadQBE "Illegal type for GT comparison")
+
+let build_cle theBlock resname resty v1 v2 =
+  match q_typeof v1 with
+  | Double -> build_reginst (fun x -> Cled (x, v1, v2)) theBlock resname resty
+  | Single -> build_reginst (fun x -> Cles (x, v1, v2)) theBlock resname resty
+  | _ -> raise (BadQBE "cle comparison requires floating type")
+
+let build_clt theBlock resname resty v1 v2 =
+  match q_typeof v1 with
+  | Double -> build_reginst (fun x -> Cltd (x, v1, v2)) theBlock resname resty
+  | Single -> build_reginst (fun x -> Clts (x, v1, v2)) theBlock resname resty
+  | _ -> raise (BadQBE "cle comparison requires floating type")
+
+let build_cge theBlock resname resty v1 v2 =
+  match q_typeof v1 with
+  | Double -> build_reginst (fun x -> Cged (x, v1, v2)) theBlock resname resty
+  | Single -> build_reginst (fun x -> Cges (x, v1, v2)) theBlock resname resty
+  | _ -> raise (BadQBE "cle comparison requires floating type")
+
+let build_cgt theBlock resname resty v1 v2 =
+  match q_typeof v1 with
+  | Double -> build_reginst (fun x -> Cgtd (x, v1, v2)) theBlock resname resty
+  | Single -> build_reginst (fun x -> Cgts (x, v1, v2)) theBlock resname resty
+  | _ -> raise (BadQBE "cle comparison requires floating type")
+
+let build_co theBlock resname resty v1 v2 =
+  match q_typeof v1 with
+  | Double -> build_reginst (fun x -> Cod (x, v1, v2)) theBlock resname resty
+  | Single -> build_reginst (fun x -> Cos (x, v1, v2)) theBlock resname resty
+  | _ -> raise (BadQBE "ordered comparison requires floating type")
+
+let build_cuo theBlock resname resty v1 v2 =
+  match q_typeof v1 with
+  | Double -> build_reginst (fun x -> Cuod (x, v1, v2)) theBlock resname resty
+  | Single -> build_reginst (fun x -> Cuos (x, v1, v2)) theBlock resname resty
+  | _ -> raise (BadQBE "ordered comparison requires floating type")
+
+(** sign extension *)
+let build_exts theBlock resname resty v1 =
+  match q_typeof v1 with
+  (* ignore resty, since we can only extend a word to Long *)
+  | Word -> build_reginst (fun x -> Extsw (x, v1)) theBlock resname Long
+  | Halfword -> build_reginst (fun x -> Extsh (x, v1)) theBlock resname resty
+  | Byte -> build_reginst (fun x -> Extsb (x, v1)) theBlock resname resty
+  (* Can only extend single to double *)
+  | Single -> build_reginst (fun x -> Exts (x, v1)) theBlock resname Double
+  | _ -> raise (BadQBE "illegal type for extension")
+
+(** unsigned extension *)
+let build_extu theBlock resname resty v1 =
+  match q_typeof v1 with
+  (* ignore resty, since we can only extend a word to Long *)
+  | Word -> build_reginst (fun x -> Extuw (x, v1)) theBlock resname Long
+  | Halfword -> build_reginst (fun x -> Extuh (x, v1)) theBlock resname resty
+  | Byte -> build_reginst (fun x -> Extub (x, v1)) theBlock resname resty
+  | _ -> raise (BadQBE "illegal type for unsigned extension")
+
+let build_truncd theBlock resname v1 =
+  (* Let QBE catch the error when there's only only type possible. *)
+  build_reginst (fun x -> Truncd (x, v1)) theBlock resname Single
+
+let build_tosi theBlock resname resty v1 =
+  match q_typeof v1 with
+  | Single -> build_reginst (fun x -> Stosi (x, v1)) theBlock resname resty
+  | Double -> build_reginst (fun x -> Dtosi (x, v1)) theBlock resname resty
+  | _ -> raise (BadQBE "tosi requires a value of floating type")
+
+let build_toui theBlock resname resty v1 =
+  match q_typeof v1 with
+  | Single -> build_reginst (fun x -> Stoui (x, v1)) theBlock resname resty
+  | Double -> build_reginst (fun x -> Dtoui (x, v1)) theBlock resname resty
+  | _ -> raise (BadQBE "toui requires a value of floating type")
+
+let build_stof theBlock resname resty v1 =
+  match q_typeof v1 with
+  | Word -> build_reginst (fun x -> Swtof (x, v1)) theBlock resname resty
+  | Long -> build_reginst (fun x -> Sltof (x, v1)) theBlock resname resty
+  | _ -> raise (BadQBE "can only convert word or long type to float")
+
+let build_utof theBlock resname resty v1 =
+  match q_typeof v1 with
+  | Word -> build_reginst (fun x -> Uwtof (x, v1)) theBlock resname resty
+  | Long -> build_reginst (fun x -> Ultof (x, v1)) theBlock resname resty
+  | _ -> raise (BadQBE "can only convert word or long type to float")
+
 (* ------------------- *)
 (* string_of functions *)
 (* ------------------- *)
@@ -408,14 +542,17 @@ let string_of_qbedatadef (ddef: qbedatadef) =
       | Some ai -> "align " ^ string_of_int ai ^ " "
       | None -> "")
   ^ " { " ^ String.concat ", "
-    (List.map (fun (ty, item) -> match item with
+    (List.map (fun item -> match item with
          | Ident (ident, offopt) ->
-           string_of_qbetype ty ^ " $" ^ ident
+           (* always pointer type for a named data item. *)
+           "l $" ^ ident
            ^ (match offopt with
                | Some offset -> " + " ^ string_of_int offset
                | None -> "")
-         | Const const ->
-           string_of_qbetype ty ^ " " ^ string_of_qbevalue (Const const)
+         | Const (ty, consts) ->
+           string_of_qbetype ty ^ " "
+           ^ String.concat " " (List.map (fun c ->
+               string_of_qbevalue (Const c)) consts)
          (* string is always byte type, right? *)
          | String sval -> "b \"" ^ sval ^ "\""
          | Z nbytes -> "z " ^ string_of_int nbytes)
@@ -498,14 +635,4 @@ let string_of_qbemodule theMod =
   String.concat "\n" (List.map string_of_qbetypedef theMod.typedefs)
   ^ String.concat "\n" (List.map string_of_qbefunction theMod.functions)
 
-(* not in first pass: "section" directive? *)
-
-(* represent values, instructions, statements, labels, functions, data,
-   typedefs,  modules *)
-(* then, function to create a module *)
-
-(* need gadt's to encode the typing rules? *)
-(* don't try to typecheck myself, just get errors from qbe? *)
-(* What if I use ints for any size numeric constant and it just works?
-   could that produce bugs? *)
 
