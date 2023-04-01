@@ -11,6 +11,28 @@ type qbetype =
   | Double
   | Struct of string
 
+type qabitype =
+  | W
+  | L
+  | UB
+  | SB
+  | UH
+  | SH
+  | S
+  | D
+  | St of string
+
+let qbetype_of_qabitype = function
+  | W -> Word
+  | L -> Long
+  | UB -> Byte
+  | SB -> Byte
+  | UH -> Halfword
+  | SH -> Halfword
+  | S -> Single
+  | D -> Double
+  | St tname -> Struct tname
+
 type qbeconst =
   (* Decided to have a separate case for each constant type. *)
   | WConst of int32
@@ -67,12 +89,6 @@ type qbedatadef = {
   items: qbedataitem list
 }
 
-(* "Abi type". Should I make sure subword types are only used in funargs? *)
-type qbefunarg =
-  | Abity of qbevalue
-  | Envarg of qbevalue
-  | Variadic
-    
 (** Instructions' result values are included as the first item. They should
     only be Regs *)
 type qbeinstr =
@@ -180,8 +196,9 @@ type qbeinstr =
   (* Cast bitwise int to float*)
   | Cast of qbevalue * qbevalue
   | Copy of qbevalue * qbevalue
-  (* Call-related *)
-  | Call of qbevalue option * string * qbefunarg list
+  (* (return register, fname, env param, params, varargs *)
+  | Call of (qabitype * string) option * string * string option
+            * (qabitype * qbevalue) list * (qabitype * qbevalue) list
   | Vastart of qbevalue (* type is ignored *)
   | Vaarg of qbevalue * qbevalue
   | Phi of qbevalue * (string * int) list
@@ -194,16 +211,17 @@ type qbeinstr =
 type qbeblock = {
   label: string;
   inFunction: qbefunction;
-  (* I DID IT *)
   mutable instrs: qbeinstr list (* does this let them? *)
 }
 
 and qbefunction = {
   name: string;
-  linkage: qbelinkage option;
+  linkages: qbelinkage list;
   mutable regctr: int;
-  rettype: qbetype option;
-  params: (qbetype * string) list;
+  rettype: qabitype option;
+  envarg: string option;
+  params: (qabitype * string) list;
+  vararg: bool;
   mutable blocks: qbeblock list
 }
 
@@ -226,17 +244,37 @@ let new_module () = {
   functions = []
 }
 
-let add_function theModule fname rettype params =
+(* Okay, making a declare_function. Should I add it to the module or
+   make the caller do that? LLVM adds it to the module and
+   has a lookup function looks it up *)
+(* I don't need to say whether the function is defined or not, I just
+   put it there, it only gets emitted if I do a define! *)
+let declare_function theModule fname linkages retopt 
+    envopt (params: (qabitype * string) list) vararg =
   let theFunction = {
-    name = fname;
-    linkage = Some Export;  (* todo: allow specifying *)
-    regctr = 0;
-    rettype = rettype;
-    params = params;
-    blocks = []
+    name=fname;
+    linkages=linkages;
+    regctr=0;
+    rettype=retopt;
+    envarg=envopt;
+    params=params;
+    blocks=[];
+    vararg=vararg
   } in
   theModule.functions <- theModule.functions @ [theFunction];
   theFunction
+
+(* oh wait, now this is identical to declare_function *)
+let define_function = declare_function
+    (* theModule fname retopt params vararg =
+  let theFunction =
+    declare_function theModule fname [Export] retopt params vararg
+  in 
+       theFunction *)
+
+(* make a map later, for efficiency *)
+let lookup_function theModule fname =
+  List.find_opt (fun f -> f.name = fname) theModule.functions
 
 (** Create a block and add it to a function. *)
 let add_block func blockname =
@@ -484,10 +522,54 @@ let build_utof theBlock resname resty v1 =
   | Long -> build_reginst (fun x -> Ultof (x, v1)) theBlock resname resty
   | _ -> raise (BadQBE "can only convert word or long type to float")
 
+let build_cast theBlock resname v1 =
+  match q_typeof v1 with
+  | Word -> build_reginst (fun x -> Cast (x, v1)) theBlock resname Single
+  | Long -> build_reginst (fun x -> Cast (x, v1)) theBlock resname Double
+  | Single -> build_reginst (fun x -> Cast (x, v1)) theBlock resname Word
+  | Double -> build_reginst (fun x -> Cast (x, v1)) theBlock resname Long
+  | _ -> raise (BadQBE "illegal type for cast")
+
+(* Do I need a separate abitype for the args?
+   I want the builder to not have to worry about much.
+   I can convert the subword types but where do I get/keep the information
+   about signed and unsigned?
+   I guess there's no automatic truncation, you have to pass in a value
+   of subword type if you use it. 
+   Just pass in an abi type marker with everything?
+   Wait...should I have a helper to build a call with a function? *)
+
+
+(* Other builds don't require the module *)
+(* qbe doesn't need to see definitions to build a call... *)
+(* for public consumption, should I have a "raw" build_call function? *)
+(* for varargs the caller needs to give the abitypes up front *)
+let build_call theModule theBlock fname retopt envopt arglist varargs =
+  match lookup_function theModule fname with
+  | None -> raise (BadQBE ("Unknown function name " ^ fname))
+  | Some func ->
+    (* The "convenience" here is to insert the abitypes for you. *)
+    let resopt = match retopt with
+      | None -> None
+      | Some rname ->
+        Some (Option.get func.rettype, rname ^ string_of_int (func.regctr)) in
+    let abiargs =
+      List.map2 (fun arg (abity, _) -> (abity, arg)) arglist func.params in
+    let theInst = Call (resopt, fname, envopt, abiargs, varargs) in
+    (func.regctr <- func.regctr + 1;
+     theBlock.instrs <- theBlock.instrs @ [theInst];
+     (* give back a non-abitype reg. Hope that's OK *)
+     Option.map (fun (abity, name) ->
+         Reg (qbetype_of_qabitype abity, name)) resopt)
+
+
+(* let build_funcall theBlock func areglist resname =  *)
+
 (* ------------------- *)
 (* string_of functions *)
 (* ------------------- *)
 
+(* todo: put this above so can use it in builder error messages *)
 let string_of_qbetype = function
   | Word -> "w"
   | Long -> "l"
@@ -495,7 +577,18 @@ let string_of_qbetype = function
   | Halfword -> "h"
   | Single -> "s"
   | Double -> "d"
-  | Struct name -> ":" ^ name
+  | Struct tname -> ":" ^ tname
+
+let string_of_qabitype = function
+  | W -> "w"
+  | L -> "l"
+  | UB -> "ub"
+  | SB -> "sb"
+  | UH -> "uh"
+  | SH -> "sh"
+  | S -> "s"
+  | D -> "d"
+  | St tname -> ":" ^ tname
 
 let string_of_qbetypedef tdef =
   "type :" ^ tdef.typename ^ " = "
@@ -603,6 +696,57 @@ let string_of_qbeinstr theInstr =
   | Alloc4 (lval, size) -> soi "alloc4" (Some lval) [size]
   | Alloc8 (lval, size) -> soi "alloc8" (Some lval) [size]
   | Alloc16 (lval, size) -> soi "alloc16" (Some lval) [size]
+  | Ceqw (res, v1, v2) -> soi "ceqw" (Some res) [v1; v2]
+  | Ceql (res, v1, v2) -> soi "ceql" (Some res) [v1; v2]
+  | Ceqs (res, v1, v2) -> soi "ceqs" (Some res) [v1; v2]
+  | Ceqd (res, v1, v2) -> soi "ceqd" (Some res) [v1; v2]
+  | Cnew (res, v1, v2) -> soi "cnew" (Some res) [v1; v2]
+  | Cnel (res, v1, v2) -> soi "cnel" (Some res) [v1; v2]
+  | Cnes (res, v1, v2) -> soi "cnex" (Some res) [v1; v2]
+  | Cned (res, v1, v2) -> soi "cned" (Some res) [v1; v2]
+  | Cslew (res, v1, v2) -> soi "cslew" (Some res) [v1; v2]
+  | Cslel (res, v1, v2) -> soi "cslel" (Some res) [v1; v2]
+  | Csltw (res, v1, v2) -> soi "csltw" (Some res) [v1; v2]
+  | Csltl (res, v1, v2) -> soi "csltl" (Some res) [v1; v2]
+  | Csgew (res, v1, v2) -> soi "csgew" (Some res) [v1; v2]
+  | Csgel (res, v1, v2) -> soi "csgel" (Some res) [v1; v2]
+  | Csgtw (res, v1, v2) -> soi "csgtw" (Some res) [v1; v2]
+  | Csgtl (res, v1, v2) -> soi "csgtl" (Some res) [v1; v2]
+  | Culew (res, v1, v2) -> soi "culew" (Some res) [v1; v2]
+  | Culel (res, v1, v2) -> soi "culel" (Some res) [v1; v2]
+  | Cultw (res, v1, v2) -> soi "cultw" (Some res) [v1; v2]
+  | Cultl (res, v1, v2) -> soi "cultl" (Some res) [v1; v2]
+  | Cugew (res, v1, v2) -> soi "cugew" (Some res) [v1; v2]
+  | Cugtl (res, v1, v2) -> soi "cugtl" (Some res) [v1; v2]
+  | Cled (res, v1, v2) -> soi "cled" (Some res) [v1; v2]
+  | Cles (res, v1, v2) -> soi "cles" (Some res) [v1; v2]
+  | Cltd (res, v1, v2) -> soi "cltd" (Some res) [v1; v2]
+  | Clts (res, v1, v2) -> soi "clts" (Some res) [v1; v2]
+  | Cged (res, v1, v2) -> soi "cged" (Some res) [v1; v2]
+  | Cges (res, v1, v2) -> soi "cges" (Some res) [v1; v2]
+  | Cgtd (res, v1, v2) -> soi "cgtd" (Some res) [v1; v2]
+  | Cgts (res, v1, v2) -> soi "cgts" (Some res) [v1; v2]
+  | Cod (res, v1, v2) -> soi "cod" (Some res) [v1; v2]
+  | Cos (res, v1, v2) -> soi "cod" (Some res) [v1; v2]
+  | Cuod (res, v1, v2) -> soi "cuod" (Some res) [v1; v2]
+  | Cuos (res, v1, v2) -> soi "cuos" (Some res) [v1; v2]
+  | Call (retopt, fname, envopt, params, varargs) ->
+    (match retopt with
+     | Some (abity, rname) ->
+       "%" ^ rname ^ " =" ^ string_of_qabitype abity ^ " "
+     | None -> "")
+    ^ "call " ^ "$" ^ fname ^ "("
+    ^ (match envopt with
+        | Some ename -> "env %" ^ ename ^ ", "
+        | None -> ""
+      )
+    ^ String.concat ", "
+      (List.map (fun (abity, qval) ->
+           string_of_qabitype abity ^ " " ^ string_of_qbevalue qval) params)
+    ^ (if varargs = [] then ""
+       else (" ... " ^ String.concat ", " (List.map (fun (abity, qval) ->
+           string_of_qabitype abity ^ " " ^ string_of_qbevalue qval) varargs)))
+    ^ ")"         
   | _ -> failwith "hold on a bit"
 
 
@@ -615,17 +759,15 @@ let string_of_qbeblock blk =
     ^ String.concat "\n" (List.map string_of_qbeinstr blk.instrs)
 
 let string_of_qbefunction func =
-  (match func.linkage with
-   | None -> ""
-   | Some lnk -> string_of_qbelinkage lnk ^ " ")
-  ^ "function " 
+  String.concat " " (List.map string_of_qbelinkage func.linkages)
+  ^ " function " 
   ^ (match func.rettype with
-      | Some rty -> string_of_qbetype rty
+      | Some rty -> string_of_qabitype rty
       | None -> "")
   ^ " $" ^ func.name ^ "("
   ^ String.concat ", "
     (List.map
-       (fun (ty, nm) -> string_of_qbevalue (Reg (ty,nm)))
+       (fun (ty, nm) -> string_of_qabitype ty ^ " %" ^ nm)
        func.params)
   ^ ") {\n"
   ^ String.concat "" (List.map string_of_qbeblock func.blocks)
