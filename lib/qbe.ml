@@ -228,8 +228,9 @@ and qbefunction = {
 and qbemodule = {
   mutable typedefs: qbetypedef list;
   (* are these the only globals? Can they be mutated? *)
-  mutable datadefs: qbedatadef list; 
-  mutable functions: qbefunction list
+  mutable datadefs: qbedatadef list;
+  mutable fundecls: qbefunction list;
+  mutable fundefs: qbefunction list
 }
 
 
@@ -241,7 +242,8 @@ and qbemodule = {
 let new_module () = {
   typedefs = [];
   datadefs = [];
-  functions = []
+  fundecls = [];
+  fundefs = []
 }
 
 (* Okay, making a declare_function. Should I add it to the module or
@@ -261,34 +263,49 @@ let declare_function theModule fname linkages retopt
     blocks=[];
     vararg=vararg
   } in
-  theModule.functions <- theModule.functions @ [theFunction];
+  theModule.fundecls <- theModule.fundecls @ [theFunction];
   theFunction
 
-(* oh wait, now this is identical to declare_function *)
-let define_function = declare_function
+(** Create a block and add it to a function. *)
+let add_block func blockname =
+  if blockname = "start"
+  then raise (BadQBE "Label name @start reserved for function entry point")
+  else 
+    let theBlock = {
+      label=blockname;
+      inFunction = func;
+      instrs = []
+    } in
+    func.blocks <- func.blocks @ [theBlock];
+    theBlock
+
+(* Create a function to be implemented, with its start block *)
+let define_function theModule fname linkages retopt envopt params vararg =
+  let theFunc = declare_function
+      theModule fname linkages retopt envopt params vararg in
+  let startBlock = {
+    label="start";
+    inFunction = theFunc;
+    instrs = [];
+  } in
+  theFunc.blocks <- [startBlock];
+  theModule.fundefs <- theModule.fundefs @ [theFunc];
+  theFunc
     (* theModule fname retopt params vararg =
   let theFunction =
     declare_function theModule fname [Export] retopt params vararg
   in 
        theFunction *)
 
+let add_data theModule data =
+  theModule.datadefs <- theModule.datadefs @ [data]
+
 (* make a map later, for efficiency *)
 let lookup_function theModule fname =
-  List.find_opt (fun f -> f.name = fname) theModule.functions
+  List.find_opt (fun f -> f.name = fname) theModule.fundecls
 
-(** Create a block and add it to a function. *)
-let add_block func blockname =
-  let theBlock = {
-    label=blockname;
-    inFunction = func;
-    instrs = []
-  } in
-  func.blocks <- func.blocks @ [theBlock];
-  theBlock
-
-
-(* then, function to create a module *)
-
+let start_block func =
+  List.hd func.blocks
 
 let insert_instr theBlock inst =
   theBlock.instrs <- theBlock.instrs @ [inst]  
@@ -565,6 +582,12 @@ let build_call theModule theBlock fname retopt envopt arglist varargs =
 
 (* let build_funcall theBlock func areglist resname =  *)
 
+let build_ret theBlock resopt =
+  let theInstr = (Ret resopt) in
+  insert_instr theBlock theInstr;
+  theInstr
+
+
 (* ------------------- *)
 (* string_of functions *)
 (* ------------------- *)
@@ -650,6 +673,7 @@ let string_of_qbedatadef (ddef: qbedatadef) =
          | String sval -> "b \"" ^ sval ^ "\""
          | Z nbytes -> "z " ^ string_of_int nbytes)
         ddef.items)
+  ^ "} \n"
 
 
 let string_of_qbeinstr theInstr = 
@@ -746,17 +770,15 @@ let string_of_qbeinstr theInstr =
     ^ (if varargs = [] then ""
        else (" ... " ^ String.concat ", " (List.map (fun (abity, qval) ->
            string_of_qabitype abity ^ " " ^ string_of_qbevalue qval) varargs)))
-    ^ ")"         
+    ^ ")"
+  | Ret ropt -> soi "ret" None (Option.to_list ropt)
   | _ -> failwith "hold on a bit"
 
 
 let string_of_qbeblock blk =
-  if blk.label = "start"
-  (* Actually should put this check in the insert_block function *)
-  then raise (BadQBE "Label name @start reserved for function entry point")
-  else 
-    "@" ^ blk.label ^ "\n"
-    ^ String.concat "\n" (List.map string_of_qbeinstr blk.instrs)
+  "@" ^ blk.label ^ "\n"
+  ^ String.concat "\n" (List.map string_of_qbeinstr blk.instrs)
+  ^ "\n"
 
 let string_of_qbefunction func =
   String.concat " " (List.map string_of_qbelinkage func.linkages)
@@ -775,6 +797,12 @@ let string_of_qbefunction func =
 
 let string_of_qbemodule theMod =
   String.concat "\n" (List.map string_of_qbetypedef theMod.typedefs)
-  ^ String.concat "\n" (List.map string_of_qbefunction theMod.functions)
+  ^ String.concat "\n" (List.map string_of_qbedatadef theMod.datadefs)
+  ^ String.concat "\n" (List.map string_of_qbefunction theMod.fundefs)
 
 
+(** Write a module to disk *)
+let write_qbemodule modname theMod =
+  let outfile = open_out (modname ^ ".ssa") in
+  output_string outfile (string_of_qbemodule theMod);
+  close_out outfile
