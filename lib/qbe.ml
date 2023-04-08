@@ -279,7 +279,9 @@ let add_block func blockname =
     func.blocks <- func.blocks @ [theBlock];
     theBlock
 
-(* Create a function to be implemented, with its start block *)
+(** Create a function to be implemented, with its start block. This
+    also adds the function to the module's list of declarations, for
+    lookup. *)
 let define_function theModule fname linkages retopt envopt params vararg =
   let theFunc = declare_function
       theModule fname linkages retopt envopt params vararg in
@@ -291,12 +293,8 @@ let define_function theModule fname linkages retopt envopt params vararg =
   theFunc.blocks <- [startBlock];
   theModule.fundefs <- theModule.fundefs @ [theFunc];
   theFunc
-    (* theModule fname retopt params vararg =
-  let theFunction =
-    declare_function theModule fname [Export] retopt params vararg
-  in 
-       theFunction *)
 
+(** Add a global data definition to the module *)
 let add_data theModule data =
   theModule.datadefs <- theModule.datadefs @ [data]
 
@@ -308,7 +306,8 @@ let start_block func =
   List.hd func.blocks
 
 let insert_instr theBlock inst =
-  theBlock.instrs <- theBlock.instrs @ [inst]  
+  theBlock.instrs <- theBlock.instrs @ [inst];
+  inst
 
 
 (* ---------------------------------------------- *)
@@ -371,8 +370,7 @@ let build_loadu theBlock resname resty valty addr =
   | _ -> raise (BadQBE "Invalid type for short-int load")
 
 let build_blit theBlock src dest len =
-  let theInst = Blit (src, dest, len) in
-  insert_instr theBlock theInst
+  insert_instr theBlock (Blit (src, dest, len))
 
 (** Stack allocation; size is dynamic (a qbevalue), alignment must be 4,
     8, or 16 *)
@@ -583,9 +581,16 @@ let build_call theModule theBlock fname retopt envopt arglist varargs =
 (* let build_funcall theBlock func areglist resname =  *)
 
 let build_ret theBlock resopt =
-  let theInstr = (Ret resopt) in
-  insert_instr theBlock theInstr;
-  theInstr
+  insert_instr theBlock (Ret resopt)
+
+let build_jmp theBlock label =
+  insert_instr theBlock (Jmp label) 
+
+let build_jnz theBlock v1 label1 label2 =
+  insert_instr theBlock (Jnz (v1, label1, label2))
+
+let build_hlt theBlock =
+  insert_instr theBlock Hlt
 
 
 (* ------------------- *)
@@ -771,8 +776,12 @@ let string_of_qbeinstr theInstr =
        else (" ... " ^ String.concat ", " (List.map (fun (abity, qval) ->
            string_of_qabitype abity ^ " " ^ string_of_qbevalue qval) varargs)))
     ^ ")"
+  | Jmp label -> "jmp @" ^ label
+  | Jnz (v, label1, label2) ->
+    "jnz " ^ string_of_qbevalue v ^ ", @" ^ label1 ^ ", @" ^ label2
   | Ret ropt -> soi "ret" None (Option.to_list ropt)
-  | _ -> failwith "hold on a bit"
+  | Hlt -> "hlt"
+  | _ -> failwith "to_string for this instr not implemented yet"
 
 
 let string_of_qbeblock blk =
