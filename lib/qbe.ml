@@ -2,6 +2,7 @@
 
 exception BadQBE of string
 
+(** Represents a base, extended or aggregate QBE type. *)
 type qbetype =
   | Word
   | Long
@@ -11,6 +12,7 @@ type qbetype =
   | Double
   | Struct of string
 
+(** A separate abitype for C-compatible function arguments *)
 type qabitype =
   | W
   | L
@@ -201,7 +203,7 @@ type qbeinstr =
             * (qabitype * qbevalue) list * (qabitype * qbevalue) list
   | Vastart of qbevalue (* type is ignored *)
   | Vaarg of qbevalue * qbevalue
-  | Phi of qbevalue * (string * int) list
+  | Phi of qbevalue * (string * qbevalue) list
   | Jmp of string
   | Jnz of qbevalue * string * string
   | Ret of qbevalue option
@@ -311,10 +313,13 @@ let insert_instr theBlock inst =
 
 
 (* ---------------------------------------------- *)
-(* Functions for building individual instructions *)
+(* Individual instruction builders                *)
 (* ---------------------------------------------- *)
 
-(** Takes a template for any reg-result instruction. *)
+(** Build any instruction that needs a new typed SSA register to put
+    the result in. Takes a lambda for the instruction with a hole for
+    the result register. Updates the containing function's register
+    counter. *)
 let build_reginst ifunc theBlock resname resty = 
   let theFunc = theBlock.inFunction in
   let resReg = Reg (resty, resname ^ (string_of_int theFunc.regctr)) in
@@ -545,15 +550,6 @@ let build_cast theBlock resname v1 =
   | Double -> build_reginst (fun x -> Cast (x, v1)) theBlock resname Long
   | _ -> raise (BadQBE "illegal type for cast")
 
-(* Do I need a separate abitype for the args?
-   I want the builder to not have to worry about much.
-   I can convert the subword types but where do I get/keep the information
-   about signed and unsigned?
-   I guess there's no automatic truncation, you have to pass in a value
-   of subword type if you use it. 
-   Just pass in an abi type marker with everything?
-   Wait...should I have a helper to build a call with a function? *)
-
 
 (* Other builds don't require the module *)
 (* qbe doesn't need to see definitions to build a call... *)
@@ -577,8 +573,17 @@ let build_call theModule theBlock fname retopt envopt arglist varargs =
      Option.map (fun (abity, name) ->
          Reg (qbetype_of_qabitype abity, name)) resopt)
 
-
+(* should I write a helper to call with an existing function object? *)
 (* let build_funcall theBlock func areglist resname =  *)
+
+let build_vastart theBlock addr =
+  insert_instr theBlock (Vastart addr)
+
+let build_vaarg theBlock resname restype addr =
+  build_reginst (fun x -> Vaarg (x, addr)) theBlock resname restype
+
+let build_phi theBlock resname restype fromlist =
+  build_reginst (fun x -> Phi (x, fromlist)) theBlock resname restype
 
 let build_ret theBlock resopt =
   insert_instr theBlock (Ret resopt)
@@ -759,12 +764,30 @@ let string_of_qbeinstr theInstr =
   | Cos (res, v1, v2) -> soi "cod" (Some res) [v1; v2]
   | Cuod (res, v1, v2) -> soi "cuod" (Some res) [v1; v2]
   | Cuos (res, v1, v2) -> soi "cuos" (Some res) [v1; v2]
+  | Extsw (res, v) -> soi "extsw" (Some res) [v]
+  | Extuw (res, v) -> soi "extuw" (Some res) [v]
+  | Extsh (res, v) -> soi "extsh" (Some res) [v]
+  | Extuh (res, v) -> soi "extuh" (Some res) [v]
+  | Extsb (res, v) -> soi "extsb" (Some res) [v]
+  | Extub (res, v) -> soi "extub" (Some res) [v]
+  | Exts (res, v) -> soi "exts" (Some res) [v]
+  | Truncd (res, v) -> soi "truncd" (Some res) [v]
+  | Stosi (res, v) -> soi "stosi" (Some res) [v]
+  | Stoui (res, v) -> soi "stoui" (Some res) [v]
+  | Dtosi (res, v) -> soi "dtosi" (Some res) [v]
+  | Dtoui (res, v) -> soi "dtoui" (Some res) [v]
+  | Swtof (res, v) -> soi "swtof" (Some res) [v]
+  | Uwtof (res, v) -> soi "uwtof" (Some res) [v]
+  | Sltof (res, v) -> soi "sltof" (Some res) [v]
+  | Ultof (res, v) -> soi "ultof" (Some res) [v]
+  | Cast (res, v) -> soi "cast" (Some res) [v]
+  | Copy (res, v) -> soi "copy" (Some res) [v]
   | Call (retopt, fname, envopt, params, varargs) ->
     (match retopt with
      | Some (abity, rname) ->
        "%" ^ rname ^ " =" ^ string_of_qabitype abity ^ " "
      | None -> "")
-    ^ "call " ^ "$" ^ fname ^ "("
+    ^ "call $" ^ fname ^ "("
     ^ (match envopt with
         | Some ename -> "env %" ^ ename ^ ", "
         | None -> ""
@@ -776,6 +799,13 @@ let string_of_qbeinstr theInstr =
        else (" ... " ^ String.concat ", " (List.map (fun (abity, qval) ->
            string_of_qabitype abity ^ " " ^ string_of_qbevalue qval) varargs)))
     ^ ")"
+  | Vastart (v) -> soi "vastart" None [v]
+  | Vaarg (res, v) -> soi "vaarg" (Some res) [v]
+  | Phi (res, fromlist) ->
+    soi "phi" (Some res) []
+    ^ String.concat ", "
+      (List.map (fun (label, v) -> "@" ^ label ^ " " ^ string_of_qbevalue v)
+         fromlist)
   | Jmp label -> "jmp @" ^ label
   | Jnz (v, label1, label2) ->
     "jnz " ^ string_of_qbevalue v ^ ", @" ^ label1 ^ ", @" ^ label2
