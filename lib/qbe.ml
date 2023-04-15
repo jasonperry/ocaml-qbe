@@ -110,14 +110,12 @@ type qbeinstr =
   | Shl of qbevalue * qbevalue * qbevalue
   (* When instructions have a type suffix, it means the type they
      take is fixed. *)
-  (* Store instructions take two arguments, return nothing *)
   | Stored of qbevalue * qbevalue
   | Stores of qbevalue * qbevalue
   | Storel of qbevalue * qbevalue
   | Storew of qbevalue * qbevalue
   | Storeh of qbevalue * qbevalue
   | Storeb of qbevalue * qbevalue
-  (* Loads take one argument, return value *)
   | Loadd of qbevalue * qbevalue
   | Loads of qbevalue * qbevalue
   | Loadl of qbevalue * qbevalue
@@ -130,7 +128,7 @@ type qbeinstr =
   (* blit can be used to copy a value-type struct, probably.
      But memcpy calls are recommended for larger data. *)
   | Blit of qbevalue * qbevalue * qbevalue
-  (* The int is the alignment. Returns the address. *)
+  (* The number is the alignment. Returns the address. *)
   | Alloc4 of qbevalue * qbevalue
   | Alloc8 of qbevalue * qbevalue
   | Alloc16 of qbevalue * qbevalue
