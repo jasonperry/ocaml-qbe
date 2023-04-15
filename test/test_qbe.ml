@@ -36,7 +36,7 @@ let testModule01: qbemodule =
     linkage = [];
     name = "strdata";
     align = None;
-    items = [String "Hello World"; Const (Byte, [WConst Int32.zero])]
+    items = [String "Hello World"; Constdata (Byte, [WConst Int32.zero])]
   } in
   add_data theMod strdata;
   (* hmmm, export is meaningless with declare. *)

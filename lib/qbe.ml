@@ -79,7 +79,7 @@ type qbelinkage =
 
 type qbedataitem =
   | Ident of string * int option (* offset - for padding? *)
-  | Const of qbetype * qbeconst list (* must be nonempty *)
+  | Constdata of qbetype * qbeconst list (* must be nonempty *)
   | String of string
   | Z of int
 
@@ -673,7 +673,7 @@ let string_of_qbedatadef (ddef: qbedatadef) =
            ^ (match offopt with
                | Some offset -> " + " ^ string_of_int offset
                | None -> "")
-         | Const (ty, consts) ->
+         | Constdata (ty, consts) ->
            string_of_qbetype ty ^ " "
            ^ String.concat " " (List.map (fun c ->
                string_of_qbevalue (Const c)) consts)
