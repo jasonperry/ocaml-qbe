@@ -5,9 +5,9 @@ description: "OCaml bindings to the QBE compiler backend"
 maintainer: ["sh.jperry@gmail.com"]
 authors: ["Jason Perry"]
 license: "LICENSE"
-homepage: "https://github.com/username/reponame"
-doc: "https://url/to/documentation"
-bug-reports: "https://github.com/username/reponame/issues"
+homepage: "https://github.com/jasonperry/ocaml-qbe"
+doc: "https://github.com/jasonperry/ocaml-qbe"
+bug-reports: "https://github.com/jasonperry/ocaml-qbe/issues"
 depends: [
   "ocaml"
   "dune" {>= "3.6"}
@@ -27,4 +27,4 @@ build: [
     "@doc" {with-doc}
   ]
 ]
-dev-repo: "git+https://github.com/username/reponame.git"
+dev-repo: "git+https://github.com/jasonperry/ocaml-qbe.git"

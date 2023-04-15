@@ -5,7 +5,7 @@
 (generate_opam_files true)
 
 (source
- (github username/reponame))
+ (github jasonperry/ocaml-qbe))
 
 (authors "Jason Perry")
 
@@ -13,7 +13,7 @@
 
 (license LICENSE)
 
-(documentation https://url/to/documentation)
+(documentation https://github.com/jasonperry/ocaml-qbe)
 
 (package
  (name qbe)
